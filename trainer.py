@@ -95,10 +95,10 @@ class ModelWrapper(nn.Module):
 
 
 class BaseRecipe(TrainingRecipe):
-    def __init__(self, data_path:str, placeholder_tokens: List[str], init_tokens: List[str]):
+    def __init__(self, dataset:str, placeholder_tokens: List[str], init_tokens: List[str]):
         super().__init__(clamp_grad=None)
 
-        self.data_path=data_path
+        self.dataset=dataset
         self.placeholder_tokens = placeholder_tokens
         self.init_tokens = init_tokens
 
@@ -135,7 +135,7 @@ class BaseRecipe(TrainingRecipe):
         train_inpainting=False
 
         train_dataset = PivotalTuningDatasetCapation(
-            instance_data_root=self.data_path,
+            instance_data_root=staff.file.get_dataset_slot(self.dataset),
             token_map=token_map,
             use_template=use_template,
             tokenizer=self.tokenizer,
@@ -162,18 +162,9 @@ class BaseRecipe(TrainingRecipe):
         staff.reg_model(ModelWrapper(self.text_encoder,self.vae,self.unet))
         
         # if cached latents, set vae to None
-
-    def set_optimizers(self, model) -> Optimizer:
-        return super().set_optimizers(model)
-
-    def forward(self, data) -> Any:
-        return super().forward(data)
-
-    def cal_loss(self, data, output) -> Tensor:
-        return super().cal_loss(data, output)
-
+    
     def report_score(self, phase: str) -> float:
-        return super().report_score(phase)
+        return 0
 
 class TextInversionRecipe(BaseRecipe):
     model:ModelWrapper
@@ -181,11 +172,13 @@ class TextInversionRecipe(BaseRecipe):
         super().__init__(data_path,placeholder_tokens,init_tokens)
     
     def ask_hyperparameter(self, hp: HyperparameterManager):
+        super().ask_hyperparameter(hp)
         self.lr_ti=hp.suggest_float('lr_ti',0,1,log=True)
         self.weight_decay_ti=hp.suggest_float('weight_decay_ti',0,1,log=True)
         # TODO
         self.t_mutliplier=1.0
         self.clip_ti_decay=True
+
     
 
     def prepare(self, staff: ModelStaff):
@@ -197,6 +190,21 @@ class TextInversionRecipe(BaseRecipe):
         for id in self.placeholder_token_ids:
             self.index_updates[id]=True
         self.index_no_updates=~self.index_updates
+    
+    def export_model_state(self):
+        learned_embeds_dict = {}
+        for tok, tok_id in zip(self.placeholder_tokens, self.placeholder_token_ids):
+            learned_embeds = self.model.text_encoder.get_input_embeddings().weight[tok_id] # type: ignore
+            logger.debug(
+                f"Current Learned Embeddings for {tok}:, id {tok_id} ",
+                learned_embeds[:4],
+            )
+            learned_embeds_dict[tok] = learned_embeds.detach().cpu()
+        
+        return learned_embeds_dict
+    
+    def import_model_state(self, state):
+        raise NotImplementedError("this process cannot be resumed now")
 
     
     def set_optimizers(self, model:ModelWrapper) -> Optimizer:
@@ -218,7 +226,7 @@ class TextInversionRecipe(BaseRecipe):
     def forward(self, data) -> Any:
         # TODO: support cached latents
         latents=self.model.vae.encode(data['pixel_values'])['latent_dist'].sample() # type: ignore
-        latents=latents*0.18215 # what's that?
+        latents=latents*0.18215 # https://github.com/CompVis/stable-diffusion/blob/main/configs/stable-diffusion/v1-inference.yaml#L17
 
         # TODO: support inpainting
 
@@ -263,37 +271,38 @@ class TextInversionRecipe(BaseRecipe):
         return loss
     
     def after_iter_train(self, data, output):
-        if self.clip_ti_decay:
-            pre_norm = (
+        with torch.no_grad():
+            if self.clip_ti_decay:
+                pre_norm = (
+                    self.model.text_encoder.get_input_embeddings()
+                    .weight[self.index_updates, :] # type: ignore
+                    .norm(dim=-1, keepdim=True)
+                )
+
+                assert self.scheduler is not None
+                lambda_ = min(1.0, 100 * self.scheduler.get_last_lr()[0])
+                self.model.text_encoder.get_input_embeddings().weight[ # type: ignore
+                    self.index_updates
+                ] = F.normalize(
+                    self.model.text_encoder.get_input_embeddings().weight[ # type: ignore
+                        self.index_updates, :
+                    ],
+                    dim=-1,
+                ) * (
+                    pre_norm + lambda_ * (0.4 - pre_norm)
+                )
+                logger.debug(pre_norm)
+            
+            current_norm = (
                 self.model.text_encoder.get_input_embeddings()
                 .weight[self.index_updates, :] # type: ignore
-                .norm(dim=-1, keepdim=True)
+                .norm(dim=-1)
             )
 
-            assert self.scheduler is not None
-            lambda_ = min(1.0, 100 * self.scheduler.get_last_lr()[0])
             self.model.text_encoder.get_input_embeddings().weight[ # type: ignore
-                self.index_updates
-            ] = F.normalize(
-                self.model.text_encoder.get_input_embeddings().weight[ # type: ignore
-                    self.index_updates, :
-                ],
-                dim=-1,
-            ) * (
-                pre_norm + lambda_ * (0.4 - pre_norm)
-            )
-            logger.debug(pre_norm)
-        
-        current_norm = (
-            self.model.text_encoder.get_input_embeddings()
-            .weight[self.index_updates, :] # type: ignore
-            .norm(dim=-1)
-        )
-
-        self.model.text_encoder.get_input_embeddings().weight[ # type: ignore
-            self.index_no_updates
-        ] = self.original_embeddings[self.index_no_updates]
-        logger.debug(f"Current Norm:\n{current_norm}")
+                self.index_no_updates
+            ] = self.original_embeddings[self.index_no_updates]
+            logger.debug(f"Current Norm:\n{current_norm}")
 
 
 class LoRARecipe(ModuleRecipe):
@@ -303,28 +312,34 @@ class LoRARecipe(ModuleRecipe):
 if __name__ == "__main__":
     tb = TrainBootstrap(
         "deps",
-        num_epoch=10,
+        num_epoch=1000,
         load_checkpoint=True,
         save_checkpoint=True,
+        checkpoint_save_period=10,
         comment=None,
         enable_prune=True,
         seed=721,
-        diagnose=True,
-        verbose=True,
+        diagnose=False,
+        verbose=False,
+        dev='cuda',
     )
 
-    data_path = chinopie.get_env("data_path")
+    dataset = chinopie.get_env("dataset")
     placeholder_tokens = list(
         map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
     )
     init_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     logger.warn(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
     pretrained_model_name = tb.hp.reg_category("pretrained_model_name")
-    batch_size = tb.hp.reg_int("batch_size", 1)
+    tb.hp.reg_int("batch_size", 1)
+    tb.hp.reg_float('lr_unet',1e-4)
+    tb.hp.reg_float('lr_text',1e-5)
+    tb.hp.reg_float('lr_ti',5e-4)
+    tb.hp.reg_float('weight_decay_ti',0.0)
 
     tb.optimize(
-        BaseRecipe(data_path,placeholder_tokens, init_tokens),
+        TextInversionRecipe(dataset,placeholder_tokens, init_tokens),
         direction="maximize",
-        inf_score=0,
+        inf_score=1, # to avoid saving best ckpt and save time
         n_trials=1,
     )

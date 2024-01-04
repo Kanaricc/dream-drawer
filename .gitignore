@@ -3,3 +3,4 @@ __pycache__
 __test*
 .vscode
 /chinopie
+/*.sh

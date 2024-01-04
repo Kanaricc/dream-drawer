@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms
 from PIL import Image
+from chinopie import logger
 
 OBJECT_TEMPLATE = [
     "a photo of a {}",
@@ -268,7 +269,7 @@ class PivotalTuningDatasetCapation(Dataset):
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
 
-        print(text)
+        logger.debug(f"prompt: {text}")
 
         if self.use_mask:
             example["mask"] = (
