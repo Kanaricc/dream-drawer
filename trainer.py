@@ -20,7 +20,7 @@ from transformers import CLIPTextModel,CLIPTokenizer
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.models.unet_2d_condition import UNet2DConditionModel
 
-from model import get_models
+from models import get_models
 from dataset import PivotalTuningDatasetCapation
 
 @torch.no_grad()
