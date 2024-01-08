@@ -31,11 +31,13 @@ class LoraInjectedLinear(nn.Module):
         nn.init.normal_(self.lora_down.weight, std=1 / r)
         nn.init.zeros_(self.lora_up.weight)
 
-    def forward(self, input):
+    def forward(self, input, scale:Optional[float]=None):
+        if scale is None:scale=self.scale
+        
         return (
             self.linear(input)
             + self.dropout(self.lora_up(self.selector(self.lora_down(input))))
-            * self.scale
+            * scale
         )
 
     def realize_as_lora(self):
