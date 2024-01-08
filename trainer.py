@@ -110,6 +110,7 @@ class BaseRecipe(TrainingRecipe):
         self.batch_size=hp.suggest_int('batch_size',1,16,log=True)
         self.lr_unet=hp.suggest_float('lr_unet',0,1,log=True)
         self.lr_text=hp.suggest_float('lr_text',0,1,log=True)
+        self.template_type=hp.suggest_category('template_type',['object','style'])
 
     def prepare(self, staff: ModelStaff):
         assert type(self.pretrained_model_name)==str
@@ -127,7 +128,7 @@ class BaseRecipe(TrainingRecipe):
 
         # TODO: refactor this
         token_map={'DUMMY':''.join(self.placeholder_tokens)}
-        use_template='object'
+        assert type(self.template_type)==str, "value of wrong type is given to `template`"
         resolution=512
         color_jitter=True
         use_face_segmentation_condition=False
@@ -137,7 +138,7 @@ class BaseRecipe(TrainingRecipe):
         train_dataset = PivotalTuningDatasetCapation(
             instance_data_root=staff.file.get_dataset_slot(self.dataset),
             token_map=token_map,
-            use_template=use_template,
+            use_template=self.template_type,
             tokenizer=self.tokenizer,
             size=resolution,
             color_jitter=color_jitter,
@@ -175,10 +176,8 @@ class TextInversionRecipe(BaseRecipe):
         super().ask_hyperparameter(hp)
         self.lr_ti=hp.suggest_float('lr_ti',0,1,log=True)
         self.weight_decay_ti=hp.suggest_float('weight_decay_ti',0,1,log=True)
-        # TODO
-        self.t_mutliplier=1.0
-        self.clip_ti_decay=True
-
+        self.clip_ti_decay=hp.suggest_category('clip_ti_decay', [True, False])
+        self.t_mutliplier=hp.suggest_float('t_mutliplier',0,1,log=True)
     
 
     def prepare(self, staff: ModelStaff):
@@ -190,6 +189,7 @@ class TextInversionRecipe(BaseRecipe):
         for id in self.placeholder_token_ids:
             self.index_updates[id]=True
         self.index_no_updates=~self.index_updates
+        logger.info(f"{self.index_updates.int().sum()} will be learned, leaving {self.index_no_updates.int().sum()} unchanged.")
     
     def export_model_state(self):
         learned_embeds_dict = {}
@@ -312,16 +312,16 @@ class LoRARecipe(ModuleRecipe):
 if __name__ == "__main__":
     tb = TrainBootstrap(
         "deps",
-        num_epoch=1000,
+        num_epoch=100,
         load_checkpoint=True,
         save_checkpoint=True,
         checkpoint_save_period=10,
-        comment=None,
         enable_prune=True,
         seed=721,
         diagnose=False,
         verbose=False,
         dev='cuda',
+        comment='alpha',
     )
 
     dataset = chinopie.get_env("dataset")
@@ -336,10 +336,13 @@ if __name__ == "__main__":
     tb.hp.reg_float('lr_text',1e-5)
     tb.hp.reg_float('lr_ti',5e-4)
     tb.hp.reg_float('weight_decay_ti',0.0)
+    tb.hp.reg_float('t_mutliplier',1.0)
+    tb.hp.reg_category('clip_ti_decay',False)
+    tb.hp.reg_category('template_type','style')
 
     tb.optimize(
         TextInversionRecipe(dataset,placeholder_tokens, init_tokens),
         direction="maximize",
-        inf_score=1, # to avoid saving best ckpt and save time
+        inf_score=-1,
         n_trials=1,
     )
