@@ -99,10 +99,12 @@ class BaseRecipe(TrainingRecipe):
     model:ModelWrapper
     tokenizer:CLIPTokenizer
 
-    def __init__(self, dataset:str):
+    def __init__(self, dataset:str,sub_character:str, probe_prompt:str):
         super().__init__(clamp_grad=1.0)
 
         self.dataset=dataset
+        self.sub_character=sub_character
+        self.probe_prompt=probe_prompt
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
         self.pretrained_model_name = hp.suggest_category(
@@ -112,12 +114,14 @@ class BaseRecipe(TrainingRecipe):
         self.batch_size=hp.suggest_int('batch_size',1,16,log=True)        
         self.t_mutliplier=hp.suggest_float('t_mutliplier',0,1,log=True)
         self.template_type=hp.suggest_category('template_type',['object','style'])
+        self.clip_skip=hp.suggest_category('clip_skip',[None,1,2])
 
         self.resolution=512
         self.color_jitter=True
         self.use_face_segmentation_condition=False
         self.use_mask_captioned_data=False
         self.train_inpainting=False
+        
     
     def prepare(self, staff: ModelStaff):
         self.noise_scheduler=None
@@ -126,6 +130,7 @@ class BaseRecipe(TrainingRecipe):
         assert type(self.template_type)==str, "value of wrong type is given to `template`"
         train_dataset = PivotalTuningDatasetCapation(
             instance_data_root=staff.file.get_dataset_slot(self.dataset),
+            sub_character=self.sub_character,
             token_map=token_map,
             use_template=self.template_type,
             tokenizer=tokenizer,
@@ -135,6 +140,7 @@ class BaseRecipe(TrainingRecipe):
             use_mask_captioned_data=self.use_mask_captioned_data,
             train_inpainting=self.train_inpainting,
         )
+        logger.info(f'loaded dataset {self.dataset}/{self.sub_character}')
         train_dataset.blur_amount = 200 # I do not know what this does
         return train_dataset
 
@@ -161,9 +167,17 @@ class BaseRecipe(TrainingRecipe):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps) # type: ignore
         latent_model_input = noisy_latents
 
-        encoder_hidden_states = self.model.text_encoder(
-            data["input_ids"]
-        )[0]
+        if self.clip_skip is None:
+            encoder_hidden_states = self.model.text_encoder(
+                data["input_ids"]
+            )[0]
+        else:
+            assert type(self.clip_skip) == int
+            encoder_hidden_states = self.model.text_encoder(
+                data["input_ids"],output_hidden_states=True
+            )[-1][-(self.clip_skip + 1)]
+            encoder_hidden_states=self.model.text_encoder.text_model.final_layer_norm(encoder_hidden_states)
+
 
         model_pred = self.model.unet(latent_model_input, timesteps, encoder_hidden_states).sample
 
@@ -191,11 +205,27 @@ class BaseRecipe(TrainingRecipe):
 
     def report_score(self, phase: str) -> float:
         return 0
+    
+    def after_epoch(self):
+        with torch.no_grad(),ModelStateKeeper(self,self.model):
+            if self.cur_epoch%10==0:
+                pipe=StableDiffusionPipeline(
+                    vae=self.model.vae,
+                    text_encoder=self.model.text_encoder,
+                    tokenizer=self.tokenizer,
+                    unet=self.model.unet,
+                    scheduler=self.noise_scheduler, # type: ignore
+                    safety_checker=None, # type: ignore
+                    feature_extractor=None # type: ignore
+                )
+
+                image=pipe(prompt=self.probe_prompt,num_inference_steps=40,guidance_scale=7).images[0] # type: ignore
+                image.save(f'probe-{self.cur_epoch}.jpg')
 
 class TextInversionRecipe(BaseRecipe):
     model:ModelWrapper
-    def __init__(self,data_path:str,placeholder_tokens:List[str],init_tokens:List[str]):
-        super().__init__(data_path)
+    def __init__(self,data_path:str,sub_character:str,placeholder_tokens:List[str],init_tokens:List[str],probe_prompt:str):
+        super().__init__(data_path,sub_character,probe_prompt)
 
         self.placeholder_tokens = placeholder_tokens
         self.init_tokens = init_tokens
@@ -321,8 +351,8 @@ class TextInversionRecipe(BaseRecipe):
 
 
 class LoRARecipe(BaseRecipe):
-    def __init__(self, dataset: str):
-        super().__init__(dataset)
+    def __init__(self, dataset: str,sub_character:str,probe_prompt:str):
+        super().__init__(dataset,sub_character,probe_prompt=probe_prompt)
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
         super().ask_hyperparameter(hp)
@@ -417,31 +447,37 @@ if __name__ == "__main__":
         diagnose=False,
         verbose=False,
         dev='cuda',
-        comment='alpha',
+        comment='arona',
     )
 
     dataset = chinopie.get_env("dataset")
-    placeholder_tokens = list(
-        map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
-    )
+    # placeholder_tokens = list(
+    #     map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
+    # )
+    placeholder_tokens=['<arona1>','<arona2>','<arona3>','<arona4>'] # this is a naive experiences from my CLIP classification works
     init_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     logger.warning(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
+    tb.hp.reg_category('template_type','object')
+
     tb.hp.reg_category("pretrained_model_name",'meinamix')
+    tb.hp.reg_category('clip_skip',2) # meinamix
+
+    tb.hp.reg_category('joint_optimization',False)
+
     tb.hp.reg_int("batch_size", 1)
     tb.hp.reg_float('t_mutliplier',1.0)
     tb.hp.reg_float('lr_text',1e-5)
     tb.hp.reg_float('lr_ti',5e-4)
     tb.hp.reg_float('weight_decay_ti',0.0)
     tb.hp.reg_category('clip_ti_decay', True)
-    tb.hp.reg_category('template_type','style')
     tb.hp.reg_float('lora_rank',4)
     tb.hp.reg_float('lr_unet',1e-4)
     tb.hp.reg_float('weight_decay_lora',1e-3)
     tb.hp.reg_float('dropout_lora',0)
-    tb.hp.reg_category('joint_optimization',False)
+
 
     tb.optimize(
-        TextInversionRecipe(dataset,placeholder_tokens, init_tokens),
+        TextInversionRecipe(dataset,'arona',placeholder_tokens, init_tokens,probe_prompt='a girl, <arona>'),
         direction="maximize",
         inf_score=-1,
         n_trials=1,
@@ -449,7 +485,7 @@ if __name__ == "__main__":
     )
 
     tb.optimize(
-        LoRARecipe(dataset),
+        LoRARecipe(dataset,'**',probe_prompt='a girl, <arona>'),
         direction="maximize",
         inf_score=-1,
         n_trials=1,

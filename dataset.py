@@ -112,6 +112,7 @@ class PivotalTuningDatasetCapation(Dataset):
         self,
         instance_data_root,
         tokenizer,
+        sub_character:str="**",
         token_map: Optional[Dict] = None,
         use_template: Optional[str] = None,
         size=512,
@@ -141,6 +142,7 @@ class PivotalTuningDatasetCapation(Dataset):
 
         # Prepare the instance images
         if use_mask_captioned_data:
+            raise NotImplementedError()
             src_imgs = glob.glob(str(instance_data_root) + "/*src.jpg")
             for f in src_imgs:
                 idx = int(str(Path(f).stem).split(".")[0])
@@ -156,13 +158,13 @@ class PivotalTuningDatasetCapation(Dataset):
 
         else:
             possibily_src_images = (
-                glob.glob(str(instance_data_root) + "/*.jpg")
-                + glob.glob(str(instance_data_root) + "/*.png")
-                + glob.glob(str(instance_data_root) + "/*.jpeg")
+                glob.glob(f"{instance_data_root}/{sub_character}/*.jpg",recursive=True)
+                + glob.glob(f"{instance_data_root}/{sub_character}/*.png",recursive=True)
+                + glob.glob(f"{instance_data_root}/{sub_character}/*.jpeg",recursive=True)
             )
             possibily_src_images = (
                 set(possibily_src_images)
-                - set(glob.glob(str(instance_data_root) + "/*mask.png"))
+                - set(glob.glob(f"{instance_data_root}/{sub_character}/*mask.jpg",recursive=True))
                 - set([str(instance_data_root) + "/caption.txt"])
             )
 
@@ -232,8 +234,9 @@ class PivotalTuningDatasetCapation(Dataset):
                 if color_jitter
                 else transforms.Lambda(lambda x: x),
                 transforms.CenterCrop(size),
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
+                transforms.Normalize([0], [1]), # i really think these should be 0 rather than 0.5
             ]
         )
 
