@@ -295,3 +295,9 @@ def apply_learned_embed_in_clip(
         token_id = tokenizer.convert_tokens_to_ids(token)
         text_encoder.get_input_embeddings().weight.data[token_id] = embeds
     return trained_tokens
+
+
+def tune_lora_scale(model, alpha: float = 1.0):
+    for _module in model.modules():
+        if _module.__class__.__name__ in ["LoraInjectedLinear", "LoraInjectedConv2d"]:
+            _module.scale = alpha
