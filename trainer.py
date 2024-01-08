@@ -106,7 +106,7 @@ class BaseRecipe(TrainingRecipe):
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
         self.pretrained_model_name = hp.suggest_category(
-            "pretrained_model_name", ["runwayml/stable-diffusion-v1-5"]
+            "pretrained_model_name", ["runwayml/stable-diffusion-v1-5","meinamix"]
         )
 
         self.batch_size=hp.suggest_int('batch_size',1,16,log=True)        
@@ -118,6 +118,9 @@ class BaseRecipe(TrainingRecipe):
         self.use_face_segmentation_condition=False
         self.use_mask_captioned_data=False
         self.train_inpainting=False
+    
+    def prepare(self, staff: ModelStaff):
+        self.noise_scheduler=None
     
     def get_dataset(self,staff:ModelStaff,tokenizer:CLIPTokenizer,token_map:Dict[str,str]):
         assert type(self.template_type)==str, "value of wrong type is given to `template`"
@@ -134,11 +137,10 @@ class BaseRecipe(TrainingRecipe):
         )
         train_dataset.blur_amount = 200 # I do not know what this does
         return train_dataset
-    
-    def prepare(self, staff: ModelStaff):
-        self.noise_scheduler:DDPMScheduler=DDPMScheduler.from_config(pretrained_model_name_or_path=self.pretrained_model_name,subfolder='scheduler')  # type: ignore
 
     def forward(self, data) -> Any:
+        assert self.noise_scheduler is not None, "noise scheduler must be init"
+
         # TODO: support cached latents
         latents=self.model.vae.encode(data['pixel_values'])['latent_dist'].sample() # type: ignore
         latents=latents*0.18215 # https://github.com/CompVis/stable-diffusion/blob/main/configs/stable-diffusion/v1-inference.yaml#L17
@@ -173,6 +175,8 @@ class BaseRecipe(TrainingRecipe):
         }
     
     def cal_loss(self, data, output) -> Tensor:
+        assert self.noise_scheduler is not None, "noise scheduler must be init"
+
         if self.noise_scheduler.config['prediction_type'] == "epsilon":
             target = output['noise']
         elif self.noise_scheduler.config['prediction_type'] == "v_prediction":
@@ -208,7 +212,7 @@ class TextInversionRecipe(BaseRecipe):
         super().prepare(staff)
 
         assert type(self.pretrained_model_name)==str
-        self.text_encoder,self.vae,self.unet,self.tokenizer,self.placeholder_token_ids = get_models(
+        self.text_encoder,self.vae,self.unet,self.tokenizer,self.placeholder_token_ids,self.noise_scheduler = get_models(
             self.pretrained_model_name,
             pretrained_vae_name_or_path=None,
             revision="main",
@@ -323,7 +327,7 @@ class LoRARecipe(BaseRecipe):
     def ask_hyperparameter(self, hp: HyperparameterManager):
         super().ask_hyperparameter(hp)
 
-        self.joint_optimization=hp.suggest_category('joint_optimize',[False,True])
+        self.joint_optimization=hp.suggest_category('joint_optimization',[False,True])
         self.lr_unet=hp.suggest_float('lr_unet',0,1,log=True)
         self.lora_rank=hp.suggest_int('lora_rank',1,512,log=True)
         self.weight_decay_lora=hp.suggest_float('weight_decay_lora',0,1,log=True)
@@ -333,7 +337,7 @@ class LoRARecipe(BaseRecipe):
         super().prepare(staff)
 
         assert type(self.pretrained_model_name)==str
-        self.text_encoder,self.vae,self.unet,self.tokenizer,self.placeholder_token_ids = get_models(
+        self.text_encoder,self.vae,self.unet,self.tokenizer,self.placeholder_token_ids,self.noise_scheduler = get_models(
             self.pretrained_model_name,
             pretrained_vae_name_or_path=None,
             revision="main",
@@ -421,8 +425,8 @@ if __name__ == "__main__":
         map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
     )
     init_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
-    logger.warn(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
-    pretrained_model_name = tb.hp.reg_category("pretrained_model_name")
+    logger.warning(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
+    tb.hp.reg_category("pretrained_model_name",'meinamix')
     tb.hp.reg_int("batch_size", 1)
     tb.hp.reg_float('t_mutliplier',1.0)
     tb.hp.reg_float('lr_text',1e-5)
@@ -450,3 +454,5 @@ if __name__ == "__main__":
         n_trials=1,
         stage=1,
     )
+
+    tb.release()
