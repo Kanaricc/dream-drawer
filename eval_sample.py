@@ -20,12 +20,12 @@ pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.conf
 logger.warning("loaded scheduler")
 
 helper=GlobalFileHelper('deps')
-for i in range(0,100,10):
-    ti_ckpt=torch.load(helper.get_exp_instance('alpha').get_checkpoint_slot(i))['model']
-    patch_pipe(pipe,ti_ckpt=ti_ckpt)
+ti_ckpt=torch.load(helper.get_exp_instance('alpha(0)').find_latest_checkpoint())['model']
+lora_unet_ckpt=torch.load(helper.get_exp_instance('alpha(1)').find_latest_checkpoint())['model']
+patch_pipe(pipe,ti_ckpt=ti_ckpt,unet_ckpt=lora_unet_ckpt)
 
-    prompt = "a girl in the style of <clear>"
-    torch.manual_seed(0) # !
-    image:Image = pipe(prompt, num_inference_steps=50, guidance_scale=7).images[0]
+prompt = "a girl in the style of <clear>"
+torch.manual_seed(0) # !
+image:Image = pipe(prompt, num_inference_steps=50, guidance_scale=7).images[0]
 
-    image.save(f'test-{i}.jpg')
+image.save(f'test.jpg')
