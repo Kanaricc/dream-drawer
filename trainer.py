@@ -323,9 +323,11 @@ class LoRARecipe(BaseRecipe):
     def ask_hyperparameter(self, hp: HyperparameterManager):
         super().ask_hyperparameter(hp)
 
+        self.joint_optimization=hp.suggest_category('joint_optimize',[False,True])
         self.lr_unet=hp.suggest_float('lr_unet',0,1,log=True)
         self.lora_rank=hp.suggest_int('lora_rank',1,512,log=True)
         self.weight_decay_lora=hp.suggest_float('weight_decay_lora',0,1,log=True)
+        self.dropout_lora=hp.suggest_float('dropout_lora',0,1,log=True)
     
     def prepare(self, staff: ModelStaff):
         super().prepare(staff)
@@ -363,11 +365,16 @@ class LoRARecipe(BaseRecipe):
         # freeze model
         chinopie.freeze_model(self.unet)
         chinopie.freeze_model(self.vae)
-        chinopie.freeze_model(self.text_encoder)
-        # TODO: allow tuning text
+        if not self.joint_optimization:
+            chinopie.freeze_model(self.text_encoder)
+            logger.info('frozen text')
+        else:
+            # TODO: allow tuning text
+            logger.info('enabled text inversion optimization')
+            raise NotImplementedError()
 
         # inject lora and collect trainable params
-        unet_lora_params,_=sd_hook.inject_trainable_lora(self.unet,r=self.lora_rank) # TODO: allow change more params
+        unet_lora_params,_=sd_hook.inject_trainable_lora(self.unet,r=self.lora_rank,dropout_p=self.dropout_lora) # TODO: allow change more params
         logger.info(f"injected {len(unet_lora_params)} lora layers")
         self.params_to_optimize=[
             {"params": itertools.chain(*unet_lora_params), "lr": self.lr_unet},
@@ -421,11 +428,13 @@ if __name__ == "__main__":
     tb.hp.reg_float('lr_text',1e-5)
     tb.hp.reg_float('lr_ti',5e-4)
     tb.hp.reg_float('weight_decay_ti',0.0)
-    tb.hp.reg_category('clip_ti_decay',False)
+    tb.hp.reg_category('clip_ti_decay', True)
     tb.hp.reg_category('template_type','style')
     tb.hp.reg_float('lora_rank',4)
     tb.hp.reg_float('lr_unet',1e-4)
     tb.hp.reg_float('weight_decay_lora',1e-3)
+    tb.hp.reg_float('dropout_lora',0)
+    tb.hp.reg_category('joint_optimization',False)
 
     tb.optimize(
         TextInversionRecipe(dataset,placeholder_tokens, init_tokens),
