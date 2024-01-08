@@ -4,3 +4,4 @@ __test*
 .vscode
 /chinopie
 /*.sh
+/dataset_*

@@ -11,7 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.optim import Optimizer
 from torch.utils.data import Dataset,DataLoader
-from chinopie import chinopie, ModuleRecipe,TrainingRecipe, TrainBootstrap, logger
+from chinopie import chinopie, ModuleRecipe,TrainingRecipe, TrainBootstrap, logger,ModelStateKeeper
 from chinopie.modelhelper import HyperparameterManager, ModelStaff
 from chinopie.optim import LinearWarmupScheduler
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -97,12 +97,12 @@ class ModelWrapper(nn.Module):
 
 class BaseRecipe(TrainingRecipe):
     model:ModelWrapper
+    tokenizer:CLIPTokenizer
 
     def __init__(self, dataset:str):
         super().__init__(clamp_grad=1.0)
 
         self.dataset=dataset
-    
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
         self.pretrained_model_name = hp.suggest_category(
@@ -408,7 +408,7 @@ class LoRARecipe(BaseRecipe):
 if __name__ == "__main__":
     tb = TrainBootstrap(
         "deps",
-        num_epoch=300,
+        num_epoch=600,
         load_checkpoint=True,
         save_checkpoint=True,
         checkpoint_save_period=10,
@@ -447,6 +447,7 @@ if __name__ == "__main__":
         n_trials=1,
         stage=0,
     )
+
     tb.optimize(
         LoRARecipe(dataset),
         direction="maximize",

@@ -9,7 +9,7 @@ from chinopie.filehelper import InstanceFileHelper,GlobalFileHelper
 
 from sd_hook import patch_pipe
 
-pipe = StableDiffusionPipeline.from_single_file('base_models/meinamix_meinaV11.safetensors').to('cuda')
+pipe = StableDiffusionPipeline.from_single_file('base_models/meinamix_meinaV11.safetensors')#.to('cuda')
 pipe.safety_checker=None
 logger.warning("loaded pipeline")
 
