@@ -162,8 +162,8 @@ def export_lora_weight(
     for _up, _down in extract_lora_ups_down(
         model, target_replace_module=target_replace_module
     ):
-        weights.append(_up.weight.to("cpu").to(torch.float16))
-        weights.append(_down.weight.to("cpu").to(torch.float16))
+        weights.append(_up.weight.to("cpu"))
+        weights.append(_down.weight.to("cpu"))
 
     return weights
 

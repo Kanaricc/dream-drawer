@@ -1,0 +1,1 @@
+download and place https://civitai.com/models/7240/meinamix here

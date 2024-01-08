@@ -9,23 +9,22 @@ from chinopie.filehelper import InstanceFileHelper,GlobalFileHelper
 
 from sd_hook import patch_pipe
 
-model_id = "runwayml/stable-diffusion-v1-5"
-
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to(
-    "cuda"
-)
+pipe = StableDiffusionPipeline.from_single_file('base_models/meinamix_meinaV11.safetensors').to('cuda')
+pipe.safety_checker=None
 logger.warning("loaded pipeline")
 
 pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
 logger.warning("loaded scheduler")
 
 helper=GlobalFileHelper('deps')
-ti_ckpt=torch.load(helper.get_exp_instance('alpha(0)').find_latest_checkpoint())['model']
-lora_unet_ckpt=torch.load(helper.get_exp_instance('alpha(1)').find_latest_checkpoint())['model']
-patch_pipe(pipe,ti_ckpt=ti_ckpt,unet_ckpt=lora_unet_ckpt)
 
-prompt = "a girl in the style of <clear>"
-torch.manual_seed(0) # !
-image:Image = pipe(prompt, num_inference_steps=50, guidance_scale=7).images[0]
+for i in range(0,300,10):
+    ti_ckpt=torch.load(helper.get_exp_instance('alpha(0)').find_latest_checkpoint())['model']
+    lora_unet_ckpt=torch.load(helper.get_exp_instance('alpha(1)').get_checkpoint_slot(i))['model']
+    patch_pipe(pipe,ti_ckpt=ti_ckpt,unet_ckpt=lora_unet_ckpt)
 
-image.save(f'test.jpg')
+    prompt = "a girl in the style of <clear>"
+    torch.manual_seed(0) # !
+    image:Image = pipe(prompt, num_inference_steps=40, guidance_scale=7,num_images_per_prompt=1).images[0]
+
+    image.save(f'test/test-{i}.jpg')
