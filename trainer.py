@@ -368,7 +368,7 @@ class LoRARecipe(BaseRecipe):
 
         # inject lora and collect trainable params
         unet_lora_params,_=sd_hook.inject_trainable_lora(self.unet,r=self.lora_rank) # TODO: allow change more params
-        logger.info(f"injected {len(unet_lora_params)} lora layers: \n{sd_hook.inspect_lora(self.unet)}")
+        logger.info(f"injected {len(unet_lora_params)} lora layers")
         self.params_to_optimize=[
             {"params": itertools.chain(*unet_lora_params), "lr": self.lr_unet},
         ]
@@ -383,14 +383,24 @@ class LoRARecipe(BaseRecipe):
     def set_scheduler(self, optimizer: Optimizer) -> LRScheduler | None:
         return LinearWarmupScheduler(optimizer,num_warmup_steps=0,num_training_steps=self.total_epoch)
     
+    def export_model_state(self):
+        return sd_hook.export_lora_weight(self.model.unet)
+    
+    def import_model_state(self, state):
+        sd_hook.monkeypatch_or_replace_lora(
+            self.model.unet,
+            state,
+            r=self.lora_rank,
+        )
+    
 
 if __name__ == "__main__":
     tb = TrainBootstrap(
         "deps",
-        num_epoch=2,
+        num_epoch=300,
         load_checkpoint=True,
         save_checkpoint=True,
-        checkpoint_save_period=1,
+        checkpoint_save_period=10,
         enable_prune=True,
         seed=721,
         diagnose=False,

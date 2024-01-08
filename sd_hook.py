@@ -139,6 +139,34 @@ def inspect_lora(model):
 
     return moved
 
+def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
+    loras = []
+
+    for _m, _n, _child_module in _find_modules(
+        model,
+        target_replace_module,
+        search_class=[LoraInjectedLinear, LoraInjectedConv2d],
+    ):
+        loras.append((_child_module.lora_up, _child_module.lora_down))
+
+    if len(loras) == 0:
+        raise ValueError("No lora injected.")
+
+    return loras
+
+def export_lora_weight(
+    model,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+):
+    weights = []
+    for _up, _down in extract_lora_ups_down(
+        model, target_replace_module=target_replace_module
+    ):
+        weights.append(_up.weight.to("cpu").to(torch.float16))
+        weights.append(_down.weight.to("cpu").to(torch.float16))
+
+    return weights
+
 
 def patch_pipe(
     pipe,
