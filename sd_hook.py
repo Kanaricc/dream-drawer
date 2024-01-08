@@ -120,6 +120,26 @@ def inject_trainable_lora(
     return require_grad_params, names
 
 
+@torch.no_grad()
+def inspect_lora(model):
+    moved = {}
+
+    for name, _module in model.named_modules():
+        if _module.__class__.__name__ in ["LoraInjectedLinear", "LoraInjectedConv2d"]:
+            ups = _module.lora_up.weight.data.clone()
+            downs = _module.lora_down.weight.data.clone()
+
+            wght: torch.Tensor = ups.flatten(1) @ downs.flatten(1)
+
+            dist = wght.flatten().abs().mean().item()
+            if name in moved:
+                moved[name].append(dist)
+            else:
+                moved[name] = [dist]
+
+    return moved
+
+
 def patch_pipe(
     pipe,
     unet_ckpt:Optional[Any]=None,
@@ -246,4 +266,4 @@ def apply_learned_embed_in_clip(
         # get the id for the token and assign the embeds
         token_id = tokenizer.convert_tokens_to_ids(token)
         text_encoder.get_input_embeddings().weight.data[token_id] = embeds
-    return token
+    return trained_tokens
