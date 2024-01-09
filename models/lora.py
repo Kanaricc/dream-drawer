@@ -32,7 +32,8 @@ class LoraInjectedLinear(nn.Module):
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input, scale:Optional[float]=None):
-        if scale is None:scale=self.scale
+        # if scale is None:scale=self.scale # TODO: the scale of diffusers is simple ignore for now
+        scale=self.scale
         
         return (
             self.linear(input)
