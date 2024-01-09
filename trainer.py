@@ -24,6 +24,9 @@ from models import get_models
 from dataset import PivotalTuningDatasetCapation
 import sd_hook
 
+def generate_token_map(tokens:List[str]):
+    return {'packed': ' '.join(tokens)}
+
 @torch.no_grad()
 def text2img_dataloader(
     train_dataset,
@@ -99,11 +102,12 @@ class BaseRecipe(TrainingRecipe):
     model:ModelWrapper
     tokenizer:CLIPTokenizer
 
-    def __init__(self, dataset:str,sub_character:str, probe_prompt:str):
+    def __init__(self, dataset:str,sub_character:str,template_type:str, probe_prompt:str):
         super().__init__(clamp_grad=1.0)
 
         self.dataset=dataset
         self.sub_character=sub_character
+        self.template_type=template_type
         self.probe_prompt=probe_prompt
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
@@ -113,11 +117,10 @@ class BaseRecipe(TrainingRecipe):
 
         self.batch_size=hp.suggest_int('batch_size',1,16,log=True)        
         self.t_mutliplier=hp.suggest_float('t_mutliplier',0,1,log=True)
-        self.template_type=hp.suggest_category('template_type',['object','style'])
         self.clip_skip=hp.suggest_category('clip_skip',[None,1,2])
 
+        self.color_jitter=hp.suggest_category('color_jitter',[True, False])
         self.resolution=512
-        self.color_jitter=True
         self.use_face_segmentation_condition=False
         self.use_mask_captioned_data=False
         self.train_inpainting=False
@@ -128,6 +131,7 @@ class BaseRecipe(TrainingRecipe):
     
     def get_dataset(self,staff:ModelStaff,tokenizer:CLIPTokenizer,token_map:Dict[str,str]):
         assert type(self.template_type)==str, "value of wrong type is given to `template`"
+        assert type(self.color_jitter)==bool
         train_dataset = PivotalTuningDatasetCapation(
             instance_data_root=staff.file.get_dataset_slot(self.dataset),
             sub_character=self.sub_character,
@@ -224,8 +228,8 @@ class BaseRecipe(TrainingRecipe):
 
 class TextInversionRecipe(BaseRecipe):
     model:ModelWrapper
-    def __init__(self,data_path:str,sub_character:str,placeholder_tokens:List[str],init_tokens:List[str],probe_prompt:str):
-        super().__init__(data_path,sub_character,probe_prompt)
+    def __init__(self,data_path:str,sub_character:str,placeholder_tokens:List[str],init_tokens:List[str],template_type:str,probe_prompt:str):
+        super().__init__(data_path,sub_character,template_type,probe_prompt)
 
         self.placeholder_tokens = placeholder_tokens
         self.init_tokens = init_tokens
@@ -252,7 +256,7 @@ class TextInversionRecipe(BaseRecipe):
         )
 
         # reg dataset
-        token_map={'DUMMY':''.join(self.placeholder_tokens)}
+        token_map=generate_token_map(self.placeholder_tokens)
         train_dataset=self.get_dataset(staff,self.tokenizer,token_map)
         train_loader=text2img_dataloader(train_dataset,self.batch_size,self.tokenizer,self.vae,self.text_encoder,cached_latents=False)
         staff.reg_dataset(train_dataset,train_loader,train_dataset,train_loader)
@@ -351,8 +355,8 @@ class TextInversionRecipe(BaseRecipe):
 
 
 class LoRARecipe(BaseRecipe):
-    def __init__(self, dataset: str,sub_character:str,probe_prompt:str):
-        super().__init__(dataset,sub_character,probe_prompt=probe_prompt)
+    def __init__(self, dataset: str,sub_character:str,template_type:str,probe_prompt:str):
+        super().__init__(dataset,sub_character,template_type,probe_prompt=probe_prompt)
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
         super().ask_hyperparameter(hp)
@@ -387,7 +391,7 @@ class LoRARecipe(BaseRecipe):
             logger.info(f"injected new tokens: {placeholder_tokens}")
             
             assert isinstance(placeholder_tokens,List)
-            token_map={'DUMMY':''.join(placeholder_tokens)}
+            token_map=generate_token_map(placeholder_tokens)
         else:
             raise NotImplementedError('unknown token map')
         
@@ -447,7 +451,7 @@ if __name__ == "__main__":
         diagnose=False,
         verbose=False,
         dev='cuda',
-        comment='arona',
+        comment='arona-1.1.0',
     )
 
     dataset = chinopie.get_env("dataset")
@@ -455,12 +459,13 @@ if __name__ == "__main__":
     #     map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
     # )
     placeholder_tokens=['<arona1>','<arona2>','<arona3>','<arona4>'] # this is a naive experiences from my CLIP classification works
+    probe_prompt='a girl, <arona1> <arona2> <arona3> <arona4>'
     init_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     logger.warning(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
-    tb.hp.reg_category('template_type','object')
 
     tb.hp.reg_category("pretrained_model_name",'meinamix')
     tb.hp.reg_category('clip_skip',2) # meinamix
+    tb.hp.reg_category('color_jitter',False)
 
     tb.hp.reg_category('joint_optimization',False)
 
@@ -477,7 +482,7 @@ if __name__ == "__main__":
 
 
     tb.optimize(
-        TextInversionRecipe(dataset,'arona',placeholder_tokens, init_tokens,probe_prompt='a girl, <arona>'),
+        TextInversionRecipe(dataset,'arona',placeholder_tokens, init_tokens,'object',probe_prompt=probe_prompt),
         direction="maximize",
         inf_score=-1,
         n_trials=1,
@@ -485,7 +490,7 @@ if __name__ == "__main__":
     )
 
     tb.optimize(
-        LoRARecipe(dataset,'**',probe_prompt='a girl, <arona>'),
+        LoRARecipe(dataset,'**','style',probe_prompt=probe_prompt),
         direction="maximize",
         inf_score=-1,
         n_trials=1,

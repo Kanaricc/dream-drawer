@@ -2,42 +2,13 @@ from typing import Optional,Dict
 from pathlib import Path
 import glob
 import random
+import os
 
 import torch
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms
 from PIL import Image
 from chinopie import logger
-
-OBJECT_TEMPLATE = [
-    "a photo of a {}",
-    "a rendering of a {}",
-    "a cropped photo of the {}",
-    "the photo of a {}",
-    "a photo of a clean {}",
-    "a photo of a dirty {}",
-    "a dark photo of the {}",
-    "a photo of my {}",
-    "a photo of the cool {}",
-    "a close-up photo of a {}",
-    "a bright photo of the {}",
-    "a cropped photo of a {}",
-    "a photo of the {}",
-    "a good photo of the {}",
-    "a photo of one {}",
-    "a close-up photo of the {}",
-    "a rendition of the {}",
-    "a photo of the clean {}",
-    "a rendition of a {}",
-    "a photo of a nice {}",
-    "a good photo of a {}",
-    "a photo of the nice {}",
-    "a photo of the small {}",
-    "a photo of the weird {}",
-    "a photo of the large {}",
-    "a photo of a cool {}",
-    "a photo of a small {}",
-]
 
 STYLE_TEMPLATE = [
     "a painting in the style of {}",
@@ -64,7 +35,6 @@ STYLE_TEMPLATE = [
 NULL_TEMPLATE = ["{}"]
 
 TEMPLATE_MAP = {
-    "object": OBJECT_TEMPLATE,
     "style": STYLE_TEMPLATE,
     "null": NULL_TEMPLATE,
 }
@@ -182,43 +152,52 @@ class PivotalTuningDatasetCapation(Dataset):
         self.use_mask = use_face_segmentation_condition or use_mask_captioned_data
         self.use_mask_captioned_data = use_mask_captioned_data
 
-        assert not use_face_segmentation_condition, "not implemented"
-        # if use_face_segmentation_condition:
-        #     for idx in range(len(self.instance_images_path)):
-        #         targ = f"{instance_data_root}/{idx}.mask.png"
-        #         # see if the mask exists
-        #         if not Path(targ).exists():
-        #             print(f"Mask not found for {targ}")
+        if use_face_segmentation_condition:
+            raise NotImplementedError()
+            for idx in range(len(self.instance_images_path)):
+                targ = f"{instance_data_root}/{idx}.mask.png"
+                # see if the mask exists
+                if not Path(targ).exists():
+                    print(f"Mask not found for {targ}")
 
-        #             print(
-        #                 "Warning : this will pre-process all the images in the instance data root."
-        #             )
+                    print(
+                        "Warning : this will pre-process all the images in the instance data root."
+                    )
 
-        #             if len(self.mask_path) > 0:
-        #                 print(
-        #                     "Warning : masks already exists, but will be overwritten."
-        #                 )
+                    if len(self.mask_path) > 0:
+                        print(
+                            "Warning : masks already exists, but will be overwritten."
+                        )
 
-        #             masks = face_mask_google_mediapipe(
-        #                 [
-        #                     Image.open(f).convert("RGB")
-        #                     for f in self.instance_images_path
-        #                 ]
-        #             )
-        #             for idx, mask in enumerate(masks):
-        #                 mask.save(f"{instance_data_root}/{idx}.mask.png")
+                    masks = face_mask_google_mediapipe(
+                        [
+                            Image.open(f).convert("RGB")
+                            for f in self.instance_images_path
+                        ]
+                    )
+                    for idx, mask in enumerate(masks):
+                        mask.save(f"{instance_data_root}/{idx}.mask.png")
 
-        #             break
+                    break
 
-        #     for idx in range(len(self.instance_images_path)):
-        #         self.mask_path.append(f"{instance_data_root}/{idx}.mask.png")
+            for idx in range(len(self.instance_images_path)):
+                self.mask_path.append(f"{instance_data_root}/{idx}.mask.png")
 
         self.num_instance_images = len(self.instance_images_path)
         self.token_map = token_map
 
         self.use_template = use_template
-        if use_template is not None:
+        if use_template == 'object':
+            if sub_character=='**':
+                template_path=os.path.join(instance_data_root,'_fallback_captions.txt')
+            else:
+                template_path=os.path.join(instance_data_root,sub_character,'_fallback_captions.txt')
+            with open(template_path,'r') as f:
+                self.templates = f.readlines()
+                logger.info(f"read fallback captions from file `{template_path}`")
+        elif use_template in TEMPLATE_MAP:
             self.templates = TEMPLATE_MAP[use_template]
+        logger.info(f"loaded {len(self.templates)} templates")
 
         self._length = self.num_instance_images
 
@@ -260,7 +239,7 @@ class PivotalTuningDatasetCapation(Dataset):
                 example["instance_masked_images"],
             ) = _generate_random_mask(example["instance_images"])
 
-        if self.use_template:
+        if self.use_template is not None:
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
 
