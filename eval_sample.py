@@ -9,7 +9,7 @@ from chinopie.filehelper import InstanceFileHelper,GlobalFileHelper
 
 from sd_hook import patch_pipe,tune_lora_scale
 
-pipe = StableDiffusionPipeline.from_single_file('base_models/meinamix_meinaV11.safetensors',local_files_only=True).to('cuda')
+pipe = StableDiffusionPipeline.from_single_file('base_models/meinamix_meinaV11.safetensors',local_files_only=True)#.to('cuda')
 pipe.safety_checker=None
 logger.warning("loaded pipeline")
 
@@ -18,11 +18,11 @@ logger.warning("loaded scheduler")
 
 helper=GlobalFileHelper('deps')
 
-ti_ckpt=torch.load(helper.get_exp_instance('alpha(0)_trial1').find_latest_checkpoint())['model']
-lora_unet_ckpt=torch.load(helper.get_exp_instance('alpha(1)_trial1').find_latest_checkpoint())['model']
+ti_ckpt=torch.load(helper.get_exp_instance('arona(0)_trial1').find_latest_checkpoint())['model']
+lora_unet_ckpt=torch.load(helper.get_exp_instance('arona(1)_trial1').find_latest_checkpoint())['model']
 patch_pipe(pipe,ti_ckpt=ti_ckpt,unet_ckpt=lora_unet_ckpt)
 
-prompt = "a girl, white hair, sit on chair, short skirt, cat ear"
+prompt = "a girl <arona1><arona2><arona3><arona4>, short skirt"
 for i in range(10):
     torch.manual_seed(i) # !
     image:Image = pipe(prompt, num_inference_steps=50, guidance_scale=7,num_images_per_prompt=1,clip_skip=2).images[0]
