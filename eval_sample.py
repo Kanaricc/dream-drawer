@@ -19,11 +19,11 @@ logger.warning("loaded scheduler")
 helper=GlobalFileHelper('deps')
 
 ti_ckpt=torch.load(helper.get_exp_instance('arona(0)_trial1').find_latest_checkpoint())['model']
-lora_unet_ckpt=torch.load(helper.get_exp_instance('arona(1)_trial1').find_latest_checkpoint())['model']
+lora_unet_ckpt=torch.load(helper.get_exp_instance('arona(1)_trial1').get_checkpoint_slot(100))['model']
 patch_pipe(pipe,ti_ckpt=ti_ckpt,unet_ckpt=lora_unet_ckpt)
-tune_lora_scale(pipe.unet,0.75)
+tune_lora_scale(pipe.unet,0.5)
 
-prompt = "a girl <arona1> <arona2> <arona3> <arona4>, blue hair, short skirt, white stocking"
+prompt = "a girl, white bow hair tie, white extra long hair, red pupils, black sailor suit, black short skirt, black stocking, white bow tie, black windbreaker"
 for i in range(10):
     torch.manual_seed(i) # !
     image:Image = pipe(prompt, num_inference_steps=50, guidance_scale=7,num_images_per_prompt=1,clip_skip=2).images[0]
