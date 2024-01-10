@@ -147,6 +147,7 @@ class BaseRecipe(TrainingRecipe):
         logger.info(f'loaded dataset {self.dataset}/{self.sub_character}')
         train_dataset.blur_amount = 200 # I do not know what this does
         return train_dataset
+    
 
     def forward(self, data) -> Any:
         assert self.noise_scheduler is not None, "noise scheduler must be init"
@@ -261,6 +262,20 @@ class TextInversionRecipe(BaseRecipe):
         train_loader=text2img_dataloader(train_dataset,self.batch_size,self.tokenizer,self.vae,self.text_encoder,cached_latents=False)
         staff.reg_dataset(train_dataset,train_loader,train_dataset,train_loader)
 
+        # load previous recipe
+        if staff.prev_files is not None:
+            ckpt_path=staff.prev_files[-1].find_latest_checkpoint()
+            assert ckpt_path is not None
+            ckpt=torch.load(ckpt_path,map_location='cpu')
+            assert ckpt['custom']['type']=='lora'
+            sd_hook.monkeypatch_or_replace_lora(
+                self.unet,
+                ckpt['model'],
+                r=ckpt['custom']['lora_rank'],
+            )
+            logger.info('merged lora')
+            
+
         chinopie.freeze_model(self.unet)
         chinopie.freeze_model(self.vae)
         params_to_freeze=itertools.chain(
@@ -355,8 +370,10 @@ class TextInversionRecipe(BaseRecipe):
 
 
 class LoRARecipe(BaseRecipe):
-    def __init__(self, dataset: str,sub_character:str,template_type:str,probe_prompt:str):
+    def __init__(self, dataset: str,sub_character:str,template_type:str,probe_prompt:str,no_use_ti:bool=False):
         super().__init__(dataset,sub_character,template_type,probe_prompt=probe_prompt)
+
+        self.no_use_ti=no_use_ti
 
     def ask_hyperparameter(self, hp: HyperparameterManager):
         super().ask_hyperparameter(hp)
@@ -393,7 +410,12 @@ class LoRARecipe(BaseRecipe):
             assert isinstance(placeholder_tokens,List)
             token_map=generate_token_map(placeholder_tokens)
         else:
-            raise NotImplementedError('unknown token map')
+            logger.info("found no previous recipe. use empty token_map")
+            token_map=generate_token_map([])
+        
+        if self.no_use_ti:
+            token_map=generate_token_map([])
+            logger.info(f'do not using new tokens by textual inversion. the new token_map: {token_map}')
         
         # reg dataset
         train_dataset=self.get_dataset(staff,self.tokenizer,token_map)
@@ -431,6 +453,12 @@ class LoRARecipe(BaseRecipe):
     def export_model_state(self):
         return sd_hook.export_lora_weight(self.model.unet)
     
+    def export_custom_state(self) -> Dict[str, Any] | None:
+        return {
+            'lora_rank':self.lora_rank,
+            'type':'lora',
+        }
+    
     def import_model_state(self, state):
         sd_hook.monkeypatch_or_replace_lora(
             self.model.unet,
@@ -442,7 +470,7 @@ class LoRARecipe(BaseRecipe):
 if __name__ == "__main__":
     tb = TrainBootstrap(
         "deps",
-        num_epoch=600,
+        num_epoch=300,
         load_checkpoint=True,
         save_checkpoint=True,
         checkpoint_save_period=10,
@@ -451,15 +479,15 @@ if __name__ == "__main__":
         diagnose=False,
         verbose=False,
         dev='cuda',
-        comment='arona-1.1.0',
+        comment='arona-2.0.0',
     )
 
     dataset = chinopie.get_env("dataset")
     # placeholder_tokens = list(
     #     map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
     # )
-    placeholder_tokens=['<arona1>','<arona2>','<arona3>','<arona4>'] # this is a naive experiences from my CLIP classification works
-    probe_prompt='a girl, <arona1> <arona2> <arona3> <arona4>'
+    placeholder_tokens=[f"<arona{i}" for i in range(8)] # this is a naive experiences from my CLIP classification works
+    probe_prompt='a girl, '+' '.join(placeholder_tokens)
     init_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     logger.warning(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
 
@@ -480,9 +508,8 @@ if __name__ == "__main__":
     tb.hp.reg_float('weight_decay_lora',1e-3)
     tb.hp.reg_float('dropout_lora',0)
 
-
     tb.optimize(
-        TextInversionRecipe(dataset,'arona',placeholder_tokens, init_tokens,'object',probe_prompt=probe_prompt),
+        LoRARecipe(dataset,'**','object',probe_prompt='a girl'),
         direction="maximize",
         inf_score=-1,
         n_trials=1,
@@ -490,11 +517,13 @@ if __name__ == "__main__":
     )
 
     tb.optimize(
-        LoRARecipe(dataset,'**','style',probe_prompt=probe_prompt),
+        TextInversionRecipe(dataset,'arona',placeholder_tokens, init_tokens,'object',probe_prompt=probe_prompt),
         direction="maximize",
         inf_score=-1,
         n_trials=1,
         stage=1,
     )
+
+    
 
     tb.release()
