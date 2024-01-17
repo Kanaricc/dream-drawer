@@ -486,7 +486,7 @@ if __name__ == "__main__":
     # placeholder_tokens = list(
     #     map(lambda x: x.strip(), chinopie.get_env("placeholder_tokens").split(","))
     # )
-    placeholder_tokens=[f"<arona{i}" for i in range(8)] # this is a naive experiences from my CLIP classification works
+    placeholder_tokens=[f"<arona{i}>" for i in range(8)] # this is a naive experiences from my CLIP classification works
     probe_prompt='a girl, '+' '.join(placeholder_tokens)
     init_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     logger.warning(f"token:\nplaceholders: {placeholder_tokens}\ninit with: {init_tokens}")
