@@ -240,7 +240,7 @@ class TextInversionRecipe(BaseRecipe):
         self.lr_ti=hp.suggest_float('lr_ti',0,1,log=True)
         self.weight_decay_ti=hp.suggest_float('weight_decay_ti',0,1,log=True)
         self.clip_ti_decay=hp.suggest_category('clip_ti_decay', [True, False])
-        self.lr_text=hp.suggest_float('lr_text',0,1,log=True)
+        # self.lr_text=hp.suggest_float('lr_text',0,1,log=True)
     
 
     def prepare(self, staff: ModelStaff):
@@ -479,7 +479,7 @@ if __name__ == "__main__":
         diagnose=False,
         verbose=False,
         dev='cuda',
-        comment='arona-2.0.0',
+        comment='arona-1.1.1',
     )
 
     dataset = chinopie.get_env("dataset")
@@ -499,12 +499,12 @@ if __name__ == "__main__":
 
     tb.hp.reg_int("batch_size", 1)
     tb.hp.reg_float('t_mutliplier',1.0)
-    tb.hp.reg_float('lr_text',1e-5)
+    # tb.hp.reg_float('lr_text',1e-5)
     tb.hp.reg_float('lr_ti',5e-4)
     tb.hp.reg_float('weight_decay_ti',0.0)
     tb.hp.reg_category('clip_ti_decay', True)
     tb.hp.reg_float('lora_rank',4)
-    tb.hp.reg_float('lr_unet',1e-4)
+    tb.hp.reg_float('lr_unet',1e-5) # 1e-4
     tb.hp.reg_float('weight_decay_lora',1e-3)
     tb.hp.reg_float('dropout_lora',0)
 
@@ -523,6 +523,8 @@ if __name__ == "__main__":
         n_trials=1,
         stage=1,
     )
+
+    
 
     
 
